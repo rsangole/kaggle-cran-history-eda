@@ -11,6 +11,7 @@ library(readr)
 library(ggplot2)
 library(lattice)
 library(naniar)
+library(skimr)
 ```
 
 # Introduction
@@ -158,29 +159,238 @@ ov_dt <- ov_dt |>
     year = lubridate::year(date_published),
     month = lubridate::month(date_published, label = TRUE),
     day = lubridate::day(date_published),
-    wday = lubridate::wday(date_published, label = TRUE)
+    wday = lubridate::wday(date_published, label = TRUE),
+    yr_mon = sprintf("%d-%s", year, month),
+    dt = lubridate::ym(paste0(year, "-", month))
   )
 ```
 
 
-# Temporal Exploration
+Title & Description Lengths
 
+```{r}
+ov_dt <- ov_dt |>
+  mutate(
+    len_title = purrr::map_int(title, ~ stringr::str_count(.x, "\\w+")),
+    len_desc = purrr::map_int(description, ~ stringr::str_count(.x, "\\w+"))
+  )
+```
+
+
+License 
+
+```{r}
+ov_dt <- ov_dt |> 
+  mutate(
+    license_cleaned = case_when(
+      stringr::str_detect(license, "^GPL-3") ~ "GPL-3",
+      stringr::str_detect(license, "^GPL\\s\\([\\s\\d\\.<=>]*3") ~ "GPL-3",
+      stringr::str_detect(license, "^GPL-2") ~ "GPL-2",
+      stringr::str_detect(license, "^GPL\\s\\([\\s\\d\\.<=>]*2") ~ "GPL-2",
+      stringr::str_detect(license, "^AGPL") ~ "AGPL",
+      stringr::str_detect(license, "^LGPL") ~ "LGPL",
+      stringr::str_detect(license, "Apache") ~ "Apache",
+      stringr::str_detect(license, "BSD") ~ "BSD",
+      stringr::str_detect(license, "LGPL") ~ "LGPL",
+      # stringr::str_detect(license, "GNU") ~ "GNU",
+      stringr::str_detect(license, "MIT") ~ "MIT",
+      stringr::str_detect(license, "CC0") ~ "CC0",
+      # stringr::str_detect(license, "MPL") ~ "MPL",
+      # stringr::str_detect(license, "Unlimited") ~ "Unlimited",
+      # stringr::str_detect(license, "^CC") ~ "CC",
+      license == "GPL" ~ "GPL",
+      TRUE ~ "Other"
+      )
+  )
+```
+
+Bug Report Domain
+
+```{r}
+ov_dt <- ov_dt |>
+  mutate(domain = purrr::map_chr(bug_reports,
+                                 ~ {
+                                   if (is.na(.x))
+                                     return("")
+                                   else
+                                     return(urltools::url_parse(.x)$domain)
+                                 }))
+```
+
+
+# Temporal Questions
 
 * How long did packages take from their first release to version 1.0? 
+* What type of packages were most frequent in different years?
+* Who are the most productive authors? 
+* Can you predict the growth toward 2025?
+* What license is most used? Has there been a change over time? - done
+* How many packages use all CAPS, all small, or a mixture?
+* How have the dependencies & imports changed over time?
+* Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?
+* Do packages have URLs for bug reports?
+* Is there any temporal patterns to when versions are submitted to CRAN?
+* Do authors use minor versions?
+* Have titles & descriptions gotten longer over time? - done
+
+
+* How have the dependencies & imports changed over time?
 
 ```{r}
 ov_dt |> 
-  select(package, version)
+    group_by(dt) |> 
+    summarise_at(vars(num_dep, num_imports), list(mean = mean)) |> 
+  ggplot(aes(x= dt)) +
+    geom_jitter(aes(y = num_dep_mean, color = "num_dep_mean"), alpha = 0.2) +
+  geom_smooth(aes(y = num_dep_mean, color = "num_dep_mean"), span = 0.3, se = FALSE) +
+  geom_jitter(aes(y = num_imports_mean, color = "num_imports_mean"), alpha = 0.2) +
+  geom_smooth(aes(y = num_imports_mean, color = "num_imports_mean"), span = 0.3, se = FALSE) +
+  theme_light()
 ```
 
-
-## What license is most used? Has there been a change over time?
+* Have titles & descriptions gotten longer over time? 
 
 ```{r}
-ov_dt
+ov_dt |> 
+    group_by(dt) |> 
+    summarise_at(vars(len_title, len_desc), list(median = median, sd = sd), na.rm = TRUE) |> 
+  ggplot(aes(x= dt)) +
+    geom_jitter(aes(y = len_title_median, color = "len_title_median"), alpha = 0.2) +
+  geom_smooth(aes(y = len_title_median, color = "len_title_median"), span = 0.3, se = FALSE) +
+  geom_jitter(aes(y = len_desc_median, color = "len_desc_median"), alpha = 0.2) +
+  geom_smooth(aes(y = len_desc_median, color = "len_desc_median"), span = 0.3, se = FALSE) +
+  theme_light()
+```
+
+```{r}
+ov_dt |> 
+  filter(year %in% c(2022, 2020, 2018)) |> 
+  ggplot() +
+  geom_density(aes(x = len_desc, 
+                   fill = as.factor(year), 
+                   color = as.factor(year)
+                   ),
+               alpha = 0.3
+               )
+ov_dt |> 
+  filter(year %in% c(2022, 2020, 2018)) |> 
+  ggplot() +
+  geom_histogram(aes(x = len_desc, 
+                   fill = as.factor(year), 
+                   color = as.factor(year)
+                   ),
+               alpha = 0.3
+               ) +
+  facet_wrap(~year)
 ```
 
 
 
-# Sets
+```{r}
+ov_dt |> 
+  ggplot(aes(x= date_published, y = len_title)) +
+  geom_jitter(alpha = 0.05) +
+  geom_smooth(span = 0.1, se = FALSE) +
+  theme_light() +
+  scale_y_log10()
+
+ov_dt |> 
+  ggplot(aes(x= date_published, y = len_desc)) +
+  geom_jitter(alpha = 0.05) +
+  geom_smooth(span = 0.2, se = FALSE) +
+  theme_light() +
+  scale_y_log10()
+```
+
+```{r}
+
+```
+
+
+* What license is most used? Has there been a change over time?
+
+```{r}
+ov_dt |> 
+  group_by(license_cleaned) |> 
+  count() |> 
+  ggplot(aes(x = forcats::fct_reorder(license_cleaned, n), y = n, fill = license_cleaned)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal() +
+  guides(fill = FALSE) +
+  labs(x = "", y = "")
+```
+
+```{r}
+ov_dt |> 
+  group_by(dt) |> 
+  count(license_cleaned) |> 
+  mutate(license_cleaned = forcats::fct_reorder(license_cleaned, n)) |> 
+  ggplot(aes(x= dt, y = n, color = license_cleaned)) +
+  # geom_line( alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(span = 0.3, se = FALSE) +
+  theme_light()
+ov_dt |> 
+  group_by(dt) |> 
+  count(license_cleaned) |> 
+  mutate(license_cleaned = forcats::fct_reorder(license_cleaned, n)) |> 
+  ggplot(aes(x= dt, y = n, color = license_cleaned)) +
+  # geom_line( alpha = 0.3) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(span = 0.8, se = FALSE) +
+  theme_light() +
+  scale_y_log10()
+```
+
+* Do packages have URLs for bug reports?
+
+
+```{r}
+ov_dt |> 
+  group_by(dt) |> 
+  count(url_exist = is.na(url)) |>  
+  ggplot(aes(x= dt, y = n, color = url_exist)) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(span = 0.3, se = FALSE) +
+  theme_light()
+ov_dt |> 
+  group_by(dt) |> 
+  count(url_exist = is.na(bug_reports)) |>  
+  ggplot(aes(x= dt, y = n, color = url_exist)) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(span = 0.3, se = FALSE) +
+  theme_light()
+```
+
+* Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?
+
+```{r}
+ov_dt |> 
+  filter(domain != "") |> 
+  mutate(domain = forcats::fct_lump_min(domain, 20)) |> 
+  group_by(dt) |> 
+  count(domain) |>  
+  ggplot(aes(x= dt, y = n, color = domain)) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(span = 0.5, se = FALSE) +
+  theme_light()
+```
+
+* Is there any temporal patterns to when versions are submitted to CRAN?
+
+```{r}
+ov_dt |> 
+  group_by(dt) |> 
+  count() |> 
+  ggplot(aes(dt, n)) +
+  geom_line()
+
+ov_dt |> 
+  filter(!is.na(dt)) |> 
+  count(dt) |> 
+  arrange(dt) |> 
+  timetk::pad_by_time(.by = "month", .pad_value = 0) -> xdat
+timetk::plot_seasonal_diagnostics(xdat, dt, n)
+```
 
