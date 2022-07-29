@@ -23,7 +23,7 @@ library(naniar)
 
 ```{r}
 input_dir <- fs::path("../input")
-files <- fs::dir_ls(input_dir)
+files <- fs::dir_ls(input_dir, glob = "*.csv")
 his_dt <- read_csv(
   files[1],
   col_types = cols(
@@ -45,7 +45,7 @@ ov_dt <- read_csv(
     author = col_character(),
     bug_reports = col_character(),
     url = col_character(),
-    date_published = col_date(format = "yyyy-mm-dd"),
+    date_published = col_date(format = "%Y-%m-%d"),
     description = col_character(),
     title = col_character()
   )
@@ -55,24 +55,12 @@ ov_dt <- read_csv(
 ## Quick View {.tabset}
 
 ```{r}
-dplyr::glimpse(his_dt, 100)
-```
-
-```{r}
 dplyr::glimpse(ov_dt, 100)
 ```
 
 
-## Conclusion
-
-
-
 
 # Data Quality
-
-```{r}
-naniar::vis_miss(his_dt)
-```
 
 ```{r}
 ov_dt |> 
@@ -83,9 +71,97 @@ ov_dt |>
 # Questions
 
 * How long did packages take from their first release to version 1.0? 
-* What type of packages were most frequent in different years? 
+* What type of packages were most frequent in different years?
 * Who are the most productive authors? 
 * Can you predict the growth toward 2025?
+* What license is most used? Has there been a change over time?
+* How many packages use all CAPS, all small, or a mixture?
+* How have the dependencies & imports changed over time?
+* Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?
+* Do packages have URLs for bug reports?
+* Is there any temporal patterns to when versions are submitted to CRAN?
+* Have titles & descriptions gotten longer over time?
+* Do authors use minor versions?
+
+## Features
+
+Separate version
+
+```{r}
+ov_dt <- ov_dt |>
+  separate(
+    version,
+    into =
+      c("major", "minor", "patch"),
+    sep = "\\.",
+    extra = "merge",
+    fill = "right",
+    remove = FALSE
+  )
+```
+
+
+Number of dependencies
+
+```{r}
+ov_dt <- ov_dt |> 
+  mutate(
+    num_dep = purrr::map_int(
+      .x = depends,
+      .f = function(x){
+        x |> 
+          stringr::str_split(",", simplify = TRUE) |> 
+          length()
+      }
+    ),
+    num_dep = ifelse(is.na(depends), 0, num_dep)
+  )
+```
+
+Number of imports
+
+```{r}
+ov_dt <- ov_dt |> 
+  mutate(
+    num_imports = purrr::map_int(
+      .x = imports,
+      .f = function(x){
+        x |> 
+          stringr::str_split(",", simplify = TRUE) |> 
+          length()
+      }
+    ),
+    num_imports = ifelse(is.na(imports), 0, num_imports)
+  )
+```
+
+Number of authors
+
+```{r}
+ov_dt <- ov_dt |> 
+  mutate(
+    num_authors = purrr::map_int(
+      .x = author,
+      .f = function(x){
+        x |> 
+          stringr::str_split(",", simplify = TRUE) |> 
+          length()
+      }
+    )
+  )
+```
+
+Temporal features
+```{r}
+ov_dt <- ov_dt |> 
+  mutate(
+    year = lubridate::year(date_published),
+    month = lubridate::month(date_published, label = TRUE),
+    day = lubridate::day(date_published),
+    wday = lubridate::wday(date_published, label = TRUE)
+  )
+```
+
 
 # Temporal Exploration
 
@@ -97,6 +173,12 @@ ov_dt |>
   select(package, version)
 ```
 
+
+## What license is most used? Has there been a change over time?
+
+```{r}
+ov_dt
+```
 
 
 
