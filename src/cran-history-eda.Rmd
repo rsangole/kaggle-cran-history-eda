@@ -1,0 +1,68 @@
+---
+title: "CRAN History EDA"
+author: "R Sangole"
+output: html_notebook
+---
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(data.table)
+library(ggplot2)
+library(lattice)
+library(naniar)
+```
+
+# Introduction
+
+
+
+# Data Preparation {.tabset}
+
+## Read In {.tabset}
+
+```{r}
+input_dir <- fs::path("../input")
+files <- fs::dir_ls(input_dir)
+his_dt <- fread(input = files[1]) 
+ov_dt <- fread(input = files[2])
+```
+
+## Quick View {.tabset}
+
+```{r}
+dplyr::glimpse(his_dt, 100)
+```
+
+```{r}
+dplyr::glimpse(ov_dt, 100)
+```
+
+
+## Conclusion
+
+
+
+
+# Data Quality
+
+```{r}
+naniar::vis_miss(his_dt)
+```
+
+```{r}
+ov_dt |> 
+  dplyr::arrange(date_published) |> 
+  vis_miss()
+```
+
+# Questions
+
+
+
+
+# Temporal Exploration
+
+
+
+
+# Sets
+
