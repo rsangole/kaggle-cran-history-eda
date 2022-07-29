@@ -5,7 +5,9 @@ output: html_notebook
 ---
 
 ```{r libraries, message=FALSE, warning=FALSE}
-library(data.table)
+library(dplyr)
+library(tidyr)
+library(readr)
 library(ggplot2)
 library(lattice)
 library(naniar)
@@ -22,8 +24,32 @@ library(naniar)
 ```{r}
 input_dir <- fs::path("../input")
 files <- fs::dir_ls(input_dir)
-his_dt <- fread(input = files[1]) 
-ov_dt <- fread(input = files[2])
+his_dt <- read_csv(
+  files[1],
+  col_types = cols(
+    package = col_character(),
+    version = col_character(),
+    date = col_date(format = "%Y-%m-%d"),
+    repository = col_character()
+  )
+)
+ov_dt <- read_csv(
+  files[2],
+  col_types = cols(
+    package = col_character(),
+    version = col_character(),
+    depends = col_character(),
+    imports = col_character(),
+    license = col_character(),
+    needs_compilation = col_logical(),
+    author = col_character(),
+    bug_reports = col_character(),
+    url = col_character(),
+    date_published = col_date(format = "yyyy-mm-dd"),
+    description = col_character(),
+    title = col_character()
+  )
+)
 ```
 
 ## Quick View {.tabset}
@@ -56,10 +82,20 @@ ov_dt |>
 
 # Questions
 
-
-
+* How long did packages take from their first release to version 1.0? 
+* What type of packages were most frequent in different years? 
+* Who are the most productive authors? 
+* Can you predict the growth toward 2025?
 
 # Temporal Exploration
+
+
+* How long did packages take from their first release to version 1.0? 
+
+```{r}
+ov_dt |> 
+  select(package, version)
+```
 
 
 
