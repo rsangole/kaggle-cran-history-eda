@@ -225,6 +225,12 @@
       "Hash": "0fb26d0674c82705c6b701d1a61e02ea",
       "Requirements": []
     },
+    "ggridges": {
+      "Package": "ggridges",
+      "Version": "0.5.3",
+      "Source": "Repository",
+      "Requirements": []
+    },
     "glue": {
       "Package": "glue",
       "Version": "1.6.2",
@@ -393,6 +399,12 @@
       "Hash": "7b5244ffdba7429e0e76961f0aa8f199",
       "Requirements": []
     },
+    "packcircles": {
+      "Package": "packcircles",
+      "Version": "0.3.4",
+      "Source": "Repository",
+      "Requirements": []
+    },
     "pillar": {
       "Package": "pillar",
       "Version": "1.8.0",
@@ -551,6 +563,12 @@
       "Source": "Repository",
       "Repository": "CRAN",
       "Hash": "17f6da8cfd7002760a859915ce7eef8f",
+      "Requirements": []
+    },
+    "timetk": {
+      "Package": "timetk",
+      "Version": "2.8.1",
+      "Source": "Repository",
       "Requirements": []
     },
     "tinytex": {
