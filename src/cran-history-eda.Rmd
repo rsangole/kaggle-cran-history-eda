@@ -31,6 +31,9 @@ library(dplyr)
 library(tidyr)
 library(readr)
 library(skimr)
+library(purrr)
+library(stringr)
+library(urltools)
 
 # Plots
 library(ggplot2)
@@ -38,9 +41,14 @@ library(naniar)
 library(packcircles)
 library(ggridges)
 
+# Tables
+library(reactable)
+
 # Settings
 theme_set(theme_minimal(
-  base_size = 14
+  base_size = 14,
+  base_family = "Menlo",
+  plot.title.position = "plot"
 ))
 ```
 
@@ -112,6 +120,8 @@ ov_dt |>
 
 # Interesting Questions
 
+Since this is an open ended exploration - unlike other EDA with the purpose of building a predictive model - before I continue to the plotting, I'd like to posit some questions which will guide the flow of further work. The first five questions are from [Martin's blog](https://heads0rtai1s.github.io/2022/07/22/kaggle-dataset-cran-packages/), with further questions which I think would be interesting to explore.
+
 1. How long did packages take from their first release to version 1.0?
 1. Which packages have had the most version updates?
 1. What type of packages were most frequent in different years?
@@ -126,26 +136,44 @@ ov_dt |>
 1. Have titles & descriptions gotten longer over time?
 1. Do authors use minor versions?
 
+
 # Feature Development {.tabset}
 
-_Read through the feature development efforts in the tabs below._
+To aid answering many of these, I first need to create a few new features in the `overview` data set. 
+
+_Read about the feature development in the tabs below. We go from 12 columns to 29 columns in the `overview` data set._
 
 ## Version Numbers {.tabset}
 
+Per the R package section in [Hadley's book](https://r-pkgs.org/lifecycle.html#version), _"an R package version is a sequence of at least two integers separated by either `.` or `-`. For example, `1.0` and `0.9.1-10` are valid versions, but `1` and `1.0-devel` are not"_. Typically, packages do follow the three number format of `<major>.<minor>.<patch>`. I'm making an assumption this is true, just to simplify things. I have a feeling it'll capture most of the cases. 
+
+This feature could help answer questions about version number progressions.
+
 ```{r}
-ov_dt <- ov_dt |>
-  separate(
-    version,
-    into =
-      c("major", "minor", "patch"),
-    sep = "\\.",
-    extra = "merge",
-    fill = "right",
-    remove = FALSE
-  )
+split_versions <- function(dat) {
+  stopifnot("version" %in% names(dat))
+  
+  dat |>
+    separate(
+      version,
+      into =
+        c("major", "minor", "patch"),
+      sep = "\\.",
+      extra = "merge", # for versions like 1.0.3-3000, keep the '3-3000' together in the 3rd col
+      fill = "right",
+      remove = FALSE
+    )
+}
+
+ov_dt <- ov_dt |> split_versions()
+hist_dt <- hist_dt |> split_versions()
+head(hist_dt) |> 
+  reactable(compact = TRUE)
 ```
 
-## Number of Dependencies & Imports {.tabset}
+## Dependies & Imports {.tabset}
+
+For the last published version of the package, how many dependencies and/and imports does each package have? My hypothesis is that packages in the past relied on lesser dependencies since they were more likely than not written in base R. With the recent explosion of adoption of R, and the adoption of the tidyverse framework, more recent packages would have a larger set of dependencies.
 
 ```{r}
 ov_dt <- ov_dt |> 
@@ -171,9 +199,12 @@ ov_dt <- ov_dt |>
     ),
     num_imports = ifelse(is.na(imports), 0, num_imports)
   )
+glimpse(ov_dt, 100)
 ```
 
-## Number of authors {.tabset}
+## Authors {.tabset}
+
+How many authors did the latest publish have? Perhaps this could provide some insights into if package authors are collaborating more than they used to. Is the R community working together?
 
 ```{r}
 ov_dt <- ov_dt |> 
@@ -187,12 +218,25 @@ ov_dt <- ov_dt |>
       }
     )
   )
+glimpse(ov_dt, 100)
 ```
 
-## Temporal Features {.tabset}
+## Temporal {.tabset}
+
+Temporal features typically useful for aggregation downstream.
 
 ```{r}
+hist_dt <- hist_dt |> 
+  mutate(
+    year = lubridate::year(date),
+    month = lubridate::month(date, label = TRUE),
+    day = lubridate::day(date),
+    wday = lubridate::wday(date, label = TRUE),
+    yr_mon = sprintf("%d-%s", year, month),
+    dt = lubridate::ym(paste0(year, "-", month))
+  )
 ov_dt <- ov_dt |> 
+  filter(!is.na(date_published)) |>
   mutate(
     year = lubridate::year(date_published),
     month = lubridate::month(date_published, label = TRUE),
@@ -201,9 +245,12 @@ ov_dt <- ov_dt |>
     yr_mon = sprintf("%d-%s", year, month),
     dt = lubridate::ym(paste0(year, "-", month))
   )
+glimpse(ov_dt, 100)
 ```
 
-## Length of Titles & Descriptions {.tabset}
+## Titles & Descriptions {.tabset}
+
+How long are the titles and description fields in the latest package submissions? Any interesting trends over time?
 
 ```{r}
 ov_dt <- ov_dt |>
@@ -211,75 +258,129 @@ ov_dt <- ov_dt |>
     len_title = purrr::map_int(title, ~ stringr::str_count(.x, "\\w+")),
     len_desc = purrr::map_int(description, ~ stringr::str_count(.x, "\\w+"))
   )
+glimpse(ov_dt, 100)
 ```
 
 ## Package Licenses {.tabset}
+
+The raw dataset has `r ov_dt |> count(license) |> nrow()` unique levels for the `license` variable. 
+
+```{r}
+ov_dt |> 
+  count(license) |> 
+  reactable(compact = TRUE)
+```
+
+But many of being quite similar to each other, some binning is in order to extract some patterns. Here, I use the `case_when` to bin together similar licenses. (I'm no expert in these licenses. I'm sure I'm taking some liberties in the grouping here).
 
 ```{r}
 ov_dt <- ov_dt |> 
   mutate(
     license_cleaned = case_when(
-      stringr::str_detect(license, "^GPL-3") ~ "GPL-3",
-      stringr::str_detect(license, "^GPL\\s\\([\\s\\d\\.<=>]*3") ~ "GPL-3",
-      stringr::str_detect(license, "^GPL-2") ~ "GPL-2",
-      stringr::str_detect(license, "^GPL\\s\\([\\s\\d\\.<=>]*2") ~ "GPL-2",
-      stringr::str_detect(license, "^AGPL") ~ "AGPL",
-      stringr::str_detect(license, "^LGPL") ~ "LGPL",
-      stringr::str_detect(license, "Apache") ~ "Apache",
-      stringr::str_detect(license, "BSD") ~ "BSD",
-      stringr::str_detect(license, "LGPL") ~ "LGPL",
-      # stringr::str_detect(license, "GNU") ~ "GNU",
-      stringr::str_detect(license, "MIT") ~ "MIT",
-      stringr::str_detect(license, "CC0") ~ "CC0",
-      # stringr::str_detect(license, "MPL") ~ "MPL",
-      # stringr::str_detect(license, "Unlimited") ~ "Unlimited",
-      # stringr::str_detect(license, "^CC") ~ "CC",
+      str_detect(license, "^GPL-3") ~ "GPL-3",
+      str_detect(license, "^GPL\\s\\([\\s\\d\\.<=>]*3") ~ "GPL-3",
+      str_detect(license, "^GPL-2") ~ "GPL-2",
+      str_detect(license, "^GPL\\s\\([\\s\\d\\.<=>]*2") ~ "GPL-2",
+      str_detect(license, "^AGPL") ~ "AGPL",
+      str_detect(license, "^LGPL") ~ "LGPL",
+      str_detect(license, "Apache") ~ "Apache",
+      str_detect(license, "BSD") ~ "BSD",
+      str_detect(license, "LGPL") ~ "LGPL",
+      str_detect(license, "MIT") ~ "MIT",
+      str_detect(license, "CC0") ~ "CC0",
       license == "GPL" ~ "GPL",
       TRUE ~ "Other"
+      # str_detect(license, "GNU") ~ "GNU", # Left these out after some trials with plots below
+      # str_detect(license, "MPL") ~ "MPL",
+      # str_detect(license, "Unlimited") ~ "Unlimited",
+      # str_detect(license, "^CC") ~ "CC",
       )
   )
+glimpse(ov_dt, 100)
 ```
 
-## Bug Reporting Domains {.tabset}
+## Domains {.tabset}
+
+Which domains do package authors typically use? My guess is GitHub rules them all, but is that true? Can we see any rise of other offerings like GitLab or BitBucket?
 
 ```{r}
 ov_dt <- ov_dt |>
-  mutate(domain = purrr::map_chr(bug_reports,
-                                 ~ {
-                                   if (is.na(.x))
-                                     return("")
-                                   else
-                                     return(urltools::url_parse(.x)$domain)
-                                 }))
+  mutate(url_domain = map_chr(url,
+                              ~ {
+                                if (is.na(.x))
+                                  return(NA)
+                                else
+                                  return(url_parse(.x)$domain)
+                              }),
+         bug_domain = map_chr(bug_reports,
+                              ~ {
+                                if (is.na(.x))
+                                  return(NA)
+                                else
+                                  return(url_parse(.x)$domain)
+                              }))
+glimpse(ov_dt, 100)
 ```
 
 # Graphical EDA
 
-## Temporal Questions
+Now that I have the data sets prepared and ready, it's time for the fun part - being creative and creating some interesting visuals! Let's attack those questions one at a time.
 
-```{r}
-ov_dt |>
+1. How long did packages take from their first release to version 1.0?
+1. Which packages have had the most version updates?
+1. What type of packages were most frequent in different years?
+1. Who are the most productive authors?
+1. Can you predict the growth toward 2025?
+1. What license is most used? Has there been a change over time?
+1. How many packages use all CAPS, all small, or a mixture?
+1. Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?
+1. Do packages have URLs for bug reports?
+1. Is there any temporal patterns to when versions are submitted to CRAN?
+1. Have titles & descriptions gotten longer over time?
+1. Do authors use minor versions?
+
+## Package Dependencies
+
+_Q: How have the dependencies & imports changed over time?_
+
+Taking the last published year-month combo for the active packages in the repo, I can calculate the median values for dependencies and imports. Medians will be robust against outliers, while also conviniently giving us whole numbers. 
+
+```{r message=FALSE, warning=FALSE}
+ov_dt |> 
+  select(date_published, dt, num_imports) |> 
+  timetk::pad_by_time(date_published, .pad_value = 0) |> 
+  mutate(dt = lubridate::ym(paste0(lubridate::year(date_published), "-", lubridate::month(date_published)))) |> 
   group_by(dt) |>
-  summarise_at(vars(num_dep, num_imports), list(mean = mean)) |>
+  mutate(median_imports = median(num_imports)) -> plot_dt
+
+plot_dt |> 
   ggplot(aes(x = dt)) +
-  geom_jitter(aes(y = num_dep_mean, color = "num_dep_mean"), alpha = 0.2) +
-  geom_smooth(
-    aes(y = num_dep_mean, color = "num_dep_mean"),
-    span = 0.3,
-    se = TRUE,
-    alpha = 0.1,
-    method = "loess"
+  geom_point(aes(y = num_imports), alpha = 0.01) +
+  geom_smooth(aes(y = median_imports), color = "red") +
+  scale_x_date(date_breaks = "1 year", date_labels = "'%y", minor_breaks = NULL, expand = c(NA, 0.2)) +
+  scale_y_continuous(minor_breaks = NULL) +
+  theme(
+    panel.grid = element_blank(),
+    axis.ticks.x.bottom = element_line(size = 0.5, colour = "gray"),
+    axis.ticks.y.left = element_line(size = 0.5, colour = "gray"),
+    plot.margin = margin(0,50,0,50)
   ) +
-  geom_jitter(aes(y = num_imports_mean, color = "num_imports_mean"), alpha = 0.2) +
-  geom_smooth(
-    aes(y = num_imports_mean, color = "num_imports_mean"),
-    span = 0.3,
-    se = TRUE,
-    alpha = 0.1,
-    method = "loess"
+  labs(
+    title = "How have `imports` changed over time?",
+    x = NULL, y = NULL
+  ) +
+  coord_cartesian(clip = "off") +
+  annotate(
+    "text",
+    x = max(plot_dt$date_published)+lubridate::ddays(90),
+    y = max(plot_dt$median_imports),
+    label = sprintf("Median: %d", max(plot_dt$median_imports)),
+    vjust = 1,
+    hjust = 0,
+    color = "red"
   )
-  # theme_light()
 ```
+
 
 ```{r fig.height=5, fig.width=5}
 deps <- ov_dt |> 
