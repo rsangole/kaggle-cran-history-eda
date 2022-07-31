@@ -51,7 +51,7 @@ library(naniar)
 library(packcircles)
 library(ggridges)
 if(!require(streamgraph))
-  devtools::install_github("hrbrmstr/streamgraph")
+  devtools::install_github("hrbrmstr/streamgraph", quiet = TRUE)
 library(streamgraph)
 library(patchwork)
 
@@ -143,15 +143,16 @@ Since this is an open ended exploration - unlike other EDA with the purpose of b
 1. What type of packages were most frequent in different years?
 1. Who are the most productive authors?
 1. Can you predict the growth toward 2025?
-1. What license is most used? Has there been a change over time? _done_
 1. How many packages use all CAPS, all small, or a mixture?
-1. How have the dependencies & imports changed over time? _done_
-1. Which repositories do packages use? Github/Bitbucket etc. How do these vary over time? _done_
-1. Do packages have URLs for bug reports? _done_
 1. Is there any temporal patterns to when versions are submitted to CRAN?
-1. Have titles & descriptions gotten longer over time? _done_
 1. Do authors use minor versions?
+1. What license is most used? Has there been a change over time? `done`
+1. How have the dependencies & imports changed over time? `done`
+1. Which repositories do packages use? Github/Bitbucket etc. How do these vary over time? `done`
+1. Do packages have URLs for bug reports? `done`
+1. Have titles & descriptions gotten longer over time? `done`
 
+<div>
 
 # Feature Development {.tabset}
 
@@ -294,7 +295,7 @@ The raw dataset has `r ov_dt %>% count(license) %>% nrow()` unique levels for th
 ```{r}
 ov_dt %>% 
   count(license) %>% 
-  reactable(compact = TRUE)
+  reactable(compact = TRUE, defaultSorted = "n", defaultSortOrder = "desc")
 ```
 
 But many of being quite similar to each other, some binning is in order to extract some patterns. Here, I use the `case_when` to bin together similar licenses. (I'm no expert in these licenses. I'm sure I'm taking some liberties in the grouping here).
@@ -353,22 +354,15 @@ ov_dt <- ov_dt %>%
 glimpse(ov_dt, 100)
 ```
 
+</div>
+
+---
+
+<div>
+
 # Graphical EDA
 
 Now that I have the data sets prepared and ready, it's time for the fun part - being creative and creating some interesting visuals! Let's attack those questions one at a time.
-
-1. How long did packages take from their first release to version 1.0?
-1. Which packages have had the most version updates?
-1. What type of packages were most frequent in different years?
-1. Who are the most productive authors?
-1. Can you predict the growth toward 2025?
-1. What license is most used? Has there been a change over time?
-1. How many packages use all CAPS, all small, or a mixture?
-1. Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?
-1. Do packages have URLs for bug reports?
-1. Is there any temporal patterns to when versions are submitted to CRAN?
-1. Have titles & descriptions gotten longer over time?
-1. Do authors use minor versions?
 
 ## Package Dependencies {.tabset}
 
@@ -385,6 +379,7 @@ Also, what happens mid-2015? There's a clear elbow in the trend right at that ti
 ```{r message=FALSE, warning=FALSE}
 plot_dotplot_ts <- function(dat,
                             title,
+                            plotmean = FALSE,
                             dday = 90,
                             pcutoff = 0.95,
                             size = 1,
@@ -392,9 +387,28 @@ plot_dotplot_ts <- function(dat,
   
   stopifnot(all(c("dt", "date_published", "y", "median_y") %in% names(dat)))
   p95 <- quantile(dat$y, pcutoff)
-  dat %>%
+  
+  plot_mean <- function(g, dat, plotmean) {
+    if (plotmean)
+      g <- g +
+        geom_smooth(aes(y = mean_y), color = "blue") +
+        annotate(
+          "text",
+          x = max(dat$date_published) + lubridate::ddays(dday),
+          y = max(dat$mean_y),
+          label = sprintf("Mean: %0.0f", max(dat$mean_y, na.rm = TRUE)),
+          vjust = 0.5,
+          hjust = 0,
+          color = "blue"
+        )
+    g
+  }
+  
+  g <- dat %>%
     ggplot(aes(x = dt)) +
-    geom_jitter(aes(y = y), alpha = alpha, size = size) +
+    geom_jitter(aes(y = y), alpha = alpha, size = size) 
+  g <- g %>% plot_mean(dat, plotmean) 
+  g +
     geom_smooth(aes(y = median_y), color = "red") +
     scale_x_date(
       date_breaks = "1 year",
@@ -415,9 +429,9 @@ plot_dotplot_ts <- function(dat,
     coord_cartesian(clip = "off") +
     annotate(
       "text",
-      x = max(dat$date_published) + lubridate::ddays(90),
+      x = max(dat$date_published) + lubridate::ddays(dday),
       y = max(dat$median_y),
-      label = sprintf("Median: %d", max(dat$median_y)),
+      label = sprintf("Med: %d", max(dat$median_y)),
       vjust = 0.5,
       hjust = 0,
       color = "red"
@@ -433,10 +447,8 @@ ov_dt %>%
   plot_dotplot_ts(
     title = "How have package `imports` changed over time?",
     dday = 90
-  )
-```
+  ) -> p1
 
-```{r message=FALSE, warning=FALSE}
 ov_dt %>% 
   select(date_published, dt, y = num_dep) %>% 
   timetk::pad_by_time(date_published, .pad_value = 0) %>% 
@@ -446,12 +458,48 @@ ov_dt %>%
   plot_dotplot_ts(
     title = "How have package `dependencies` changed over time?",
     dday = 90
-  )
+  ) -> p2
+
+p1/p2
+```
+
+## Titles & Description {.tabset}
+
+Interestingly, titles have settled down at a median length of 7, while mean & median description lengths have been monotonically increasing since 2015. Looks like folks have been putting in more effort to describe their packages in an effort to attract R users.
+
+### Time Series Plots {.tabset}
+
+```{r message=FALSE, warning=FALSE}
+ov_dt %>% 
+  select(date_published, dt, y = len_title) %>% 
+  timetk::pad_by_time(date_published, .pad_value = 0) %>% 
+  mutate(dt = lubridate::ym(paste0(lubridate::year(date_published), "-", lubridate::month(date_published)))) %>% 
+  group_by(dt) %>%
+  mutate(median_y = median(y))%>%
+  plot_dotplot_ts(
+    title = "Title Lengths",
+    dday = 90
+  ) -> p1
+
+ov_dt %>% 
+  select(date_published, dt, y = len_desc) %>% 
+  timetk::pad_by_time(date_published, .pad_value = 0) %>% 
+  mutate(dt = lubridate::ym(paste0(lubridate::year(date_published), "-", lubridate::month(date_published)))) %>% 
+  group_by(dt) %>%
+  mutate(median_y = median(y),
+         mean_y = mean(y))%>%
+  plot_dotplot_ts(
+    title = "Description Lengths",
+    dday = 80,
+    plotmean = TRUE
+  ) -> p2
+
+p1/p2
 ```
 
 ### Ridge Plots {.tabset}
 
-Another interesting way to look at the same data is by ridge plots using [`{ggridges}`](https://wilkelab.org/ggridges/). It's easy to see the large spread of descriptions and how it's been increasing over time.
+Another interesting way to look at the same data is by ridge plots using `{ggridges}`. It’s easy to see the large spread of descriptions and how it’s been increasing over time.
 
 ```{r fig.height=7, fig.width=9, message=FALSE, warning=FALSE}
 deps <- ov_dt %>%
@@ -483,7 +531,6 @@ deps %>%
     y = NULL
   )
 ```
-
 ## Licenses {.tabset}
 
 _Q: What license is most used? Has there been a change over time?_
@@ -515,7 +562,8 @@ plot_bubbles <- function(dat,
   coords <- tibble(
     x = xpack + runif(length(xpack)),
     y = ypack + runif(length(ypack)),
-    r = bubble_radius
+    r = bubble_radius,
+    label = rep(dat$label, times = dat$n_scaled)
   )
   
   packed_coords <-
@@ -523,7 +571,7 @@ plot_bubbles <- function(dat,
   
   packed_coords$layout %>%
     ggplot(aes(x, y)) +
-    geom_point(aes(size = radius), alpha = alpha) +
+    geom_point(aes(size = radius, color = coords$label), alpha = alpha) +
     coord_equal() +
     theme_minimal() +
     theme(
@@ -562,7 +610,7 @@ ov_dt %>%
     plot_radius = 8,
     bubble_radius = .32,
     textsize = 8,
-    alpha = 0.2,
+    alpha = 0.4,
     color = "gray30",
     maxiter = 1000
   )
@@ -585,7 +633,7 @@ ov_dt %>%
 
 ### TS Plot {.tabset}
 
-GPL-2, GPL-3 and MIT licenses seem to have the same adoption rate over time. Again, we see the sudden shifts in datapoints available after mid-2015.
+GPL-2, GPL-3 and MIT licenses seem to have the same adoption rate over time. Again, we see the sudden shifts in data points available after mid-2015.
 
 ```{r message=FALSE, warning=FALSE}
 ov_dt %>% count(license_cleaned) %>% arrange(-n) -> lic_n
@@ -624,8 +672,8 @@ ov_dt %>%
          val = sum(n),
          pc = n / val) -> pdat
 
-pdat |> 
-  filter(dt > "2015-01-01", dt < "2022-06-30") |> 
+pdat %>% 
+  filter(dt > "2015-01-01", dt < "2022-06-30") %>% 
   streamgraph(license_cleaned, n, dt)  %>%
   sg_axis_x(1, "year", "%Y") %>%
   sg_legend(show=TRUE, label="License: ") %>%
@@ -633,42 +681,65 @@ pdat |>
   sg_title("License Adoption since 2015")
 ```
 
-## Bug Report URLs {.tabset}
 
-_Q: Do packages have URLs for bug reports?_
+## URL Domain {.tabset}
+
+_Q: Which domains do packages use for their website?_
+
+### Bubble Chart {.tabset}
+
+GitHub is definitely the preferred choice by a majority of the packages, followed by ROpenSci, and CRAN-RProject. _Note: Here, I'm grouping all the remaining levels, where counds are < 50 in 'Other'._
+
+```{r}
+ov_dt %>% 
+  filter(url_domain != "") %>% 
+  mutate(url_domain = forcats::fct_lump_min(url_domain, 50)) %>% 
+  count(url_domain) %>% 
+  mutate(label = sprintf("%s\n%s", url_domain, scales::label_comma()(n))) %>% 
+  arrange(runif(1:n())) %>% 
+  plot_bubbles(
+     .scale = 50,
+    plot_radius = 5,
+    bubble_radius = .3,
+    textsize = 6,
+    alpha = 0.4,
+    color = "gray30",
+    maxiter = 1300
+  )
+```
+
+### Time Series Plots {.tabset}
+
+A similar story when seen over time.
 
 ```{r message=FALSE, warning=FALSE}
 ov_dt %>%
-  group_by(dt) %>% 
-  count(url_exist = is.na(url_domain)) %>%  
-  ggplot(aes(x= dt, y = n, color = url_exist)) +
-  geom_jitter(alpha = 0.3) +
-  geom_smooth(span = 0.3, se = FALSE) +
-  theme_light()
-ov_dt %>% 
-  group_by(dt) %>% 
-  count(url_exist = is.na(bug_domain)) %>%  
-  ggplot(aes(x= dt, y = n, color = url_exist)) +
-  geom_jitter(alpha = 0.3) +
-  geom_smooth(span = 0.3, se = FALSE) +
-  theme_light()
+  filter(url_domain != "") %>%
+  mutate(url_domain = forcats::fct_lump_min(url_domain, 50)) %>%
+  group_by(dt) %>%
+  count(url_domain) %>%
+  ggplot(aes(x = dt, y = n, color = url_domain)) +
+  geom_smooth(
+    span = 0.4,
+    se = FALSE,
+    show.legend = FALSE,
+    size = .3
+  ) +
+  geom_jitter(alpha = 0.8) +
+  theme_light() +
+  theme(legend.title = element_blank()) +
+  labs(x = NULL,
+       y = "Count",
+       title = "Domains used for Websites")
 ```
 
-## Domains {.tabset}
+## Bug Reporting Domain {.tabset}
 
-_Q: Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?_
+_Q: Which domain do packages use for reporting bugs / filling feature requests? How do these vary over time?_
 
-```{r message=FALSE, warning=FALSE}
-ov_dt %>% 
-  filter(bug_domain != "") %>% 
-  mutate(bug_domain = forcats::fct_lump_min(bug_domain, 20)) %>% 
-  group_by(dt) %>% 
-  count(bug_domain) %>%  
-  ggplot(aes(x= dt, y = n, color = bug_domain)) +
-  geom_jitter(alpha = 0.3) +
-  geom_smooth(span = 0.5, se = FALSE) +
-  theme_light()
-```
+### Bubble Chart {.tabset}
+
+This one's not even close. GitHub is the dominant player by a long shot.
 
 ```{r}
 ov_dt %>% 
@@ -678,40 +749,44 @@ ov_dt %>%
   mutate(label = sprintf("%s\n%s", bug_domain, scales::label_comma()(n))) %>% 
   arrange(runif(1:n())) %>% 
   plot_bubbles(
-     .scale = 30,
+     .scale = 35,
     plot_radius = 5,
     bubble_radius = .3,
-    textsize = 8,
-    alpha = 0.2,
+    textsize = 6,
+    alpha = 0.4,
     color = "gray30",
     maxiter = 1300
   )
 ```
 
-## Temporal Patterns {.tabset}
+### Time Series Plots {.tabset}
 
-_Q: Is there any temporal patterns to when versions are submitted to CRAN?_
+And it has been from the start.
 
-```{r}
-ov_dt %>% 
-  filter(!is.na(dt), dt < "2022-07-01") %>% 
-  count(dt) %>% 
-  arrange(dt) %>% 
-  timetk::pad_by_time(dt, .by = "month", .pad_value = 0) %>% 
-  ggplot(aes(dt, n)) +
-  geom_line()
-
-ov_dt %>% 
-  filter(!is.na(dt), dt < "2022-07-01") %>% 
-  count(dt) %>% 
-  arrange(dt) %>% 
-  timetk::pad_by_time(dt, .by = "month", .pad_value = 0) -> xdat
-timetk::plot_seasonal_diagnostics(xdat, dt, log(n), .interactive = FALSE)
-
-timetk::plot_stl_diagnostics(xdat %>% filter(dt > "2018-01-01", dt < "2022-07-01"), dt, n, .interactive = FALSE, .feature_set = c("observed", "season", "trend", "remainder"))
+```{r message=FALSE, warning=FALSE}
+ov_dt %>%
+  filter(bug_domain != "") %>%
+  mutate(bug_domain = forcats::fct_lump_min(bug_domain, 20)) %>%
+  group_by(dt) %>%
+  count(bug_domain) %>%
+  ggplot(aes(x = dt, y = n, color = bug_domain)) +
+  geom_smooth(
+    span = 0.4,
+    se = FALSE,
+    show.legend = FALSE,
+    size = .3
+  ) +
+  geom_jitter(alpha = 0.8) +
+  theme_light() +
+  theme(legend.title = element_blank()) +
+  labs(x = NULL,
+       y = "Count",
+       title = "Domains used for Bug Reporting")
 ```
 
-
+</div>
 ---
 
-Thanks for reading the EDA, lots more to explore in this dataset!
+That's it for now. I'll keep updating this EDA as I find time and think of more questions to explore.
+
+Thanks for reading!
