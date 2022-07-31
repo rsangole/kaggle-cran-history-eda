@@ -3,5 +3,5 @@
 .Rdata
 .httr-oauth
 .DS_Store
-input/*.csv
+input/r-package-history-on-cran/*.csv
 input/*.zip

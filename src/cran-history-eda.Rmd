@@ -1,19 +1,28 @@
 ---
-title: "CRAN History EDA"
+title: "R Package History - EDA"
 author: "R Sangole"
+date: "Jul 31, 2022"
 output: 
-  html_notebook: 
+  html_document: 
     toc: yes
     highlight: kate
     theme: paper
-    code_folding: show
+    code_folding: hide
+    fig_width: 11
+    fig_height: 4
 ---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo=TRUE, error=FALSE)
+knitr::opts_chunk$set(out.width="100%", fig.height = 6, split=FALSE, fig.align = 'default')
+options(dplyr.summarise.inform = FALSE)
+```
 
 # Introduction
 
 Welcome to the Exploratory Data Analysis of the [CRAN](https://cran.r-project.org) historical data set. As you may already know, CRAN is a network of servers around the world which store code and documentation for the R packages over time. As of writing this EDA, CRAN had just over 18,000 packages available in it's repository.
 
-[![CRAN Website](images/paste-715AEC83.png){width="693"}](https://cran.r-project.org)
+![CRAN Website](https://bookdown.org/introrbook/intro2r/images/chapter1/fig1.PNG)
 
 [Heads or Tails](https://www.kaggle.com/headsortails) has done a great job of grabbing historical data, cleaning it up and preparing it for us R enthusiasts. Read about the approach he followed in his [blogpost](https://heads0rtai1s.github.io/2022/07/22/kaggle-dataset-cran-packages/).
 
@@ -34,12 +43,17 @@ library(skimr)
 library(purrr)
 library(stringr)
 library(urltools)
+library(magrittr)
 
 # Plots
 library(ggplot2)
 library(naniar)
 library(packcircles)
 library(ggridges)
+if(!require(streamgraph))
+  devtools::install_github("hrbrmstr/streamgraph")
+library(streamgraph)
+library(patchwork)
 
 # Tables
 library(reactable)
@@ -47,9 +61,10 @@ library(reactable)
 # Settings
 theme_set(theme_minimal(
   base_size = 14,
-  base_family = "Menlo",
+  base_family = "Menlo"))
+theme_update(
   plot.title.position = "plot"
-))
+)
 ```
 
 
@@ -60,10 +75,9 @@ Let's start be reading in the data. There are two `CSV` files in this dataset. F
 -   `cran_package_overview.csv`: all R packages currently available through CRAN, with (usually) 1 row per package...
 -   `cran_package_history.csv`: version history of virtually all packages in the previous table\...
 
-
 ```{r}
 hist_dt <- read_csv(
-  "../input/cran_package_history.csv",
+  "../input/r-package-history-on-cran/cran_package_history.csv",
   col_types = cols(
     package = col_character(),
     version = col_character(),
@@ -72,7 +86,7 @@ hist_dt <- read_csv(
   )
 )
 ov_dt <- read_csv(
-  "../input/cran_package_overview.csv",
+  "../input/r-package-history-on-cran/cran_package_overview.csv",
   col_types = cols(
     package = col_character(),
     version = col_character(),
@@ -88,6 +102,8 @@ ov_dt <- read_csv(
     title = col_character()
   )
 )
+glimpse(hist_dt, 80)
+glimpse(ov_dt, 80)
 ```
 
 ## Quick View {.tabset}
@@ -111,9 +127,9 @@ My favorite way of exploring missing data is to make it visible, using [Nick Tie
 * Roughly half of `bug_reports` and `url` are missing. These don't seem to be data issues as much as authors who don't have a place to issue bugs or website for their package respectively.
 * `date_published` has only 1 row with missing, which seems like a data quality spill.
 
-```{r}
-ov_dt |> 
-  dplyr::arrange(date_published) |> 
+```{r message=FALSE, warning=FALSE}
+ov_dt %>% 
+  dplyr::arrange(date_published) %>% 
   vis_miss()
 ```
 
@@ -127,13 +143,13 @@ Since this is an open ended exploration - unlike other EDA with the purpose of b
 1. What type of packages were most frequent in different years?
 1. Who are the most productive authors?
 1. Can you predict the growth toward 2025?
-1. What license is most used? Has there been a change over time?
+1. What license is most used? Has there been a change over time? _done_
 1. How many packages use all CAPS, all small, or a mixture?
-1. How have the dependencies & imports changed over time?
-1. Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?
-1. Do packages have URLs for bug reports?
+1. How have the dependencies & imports changed over time? _done_
+1. Which repositories do packages use? Github/Bitbucket etc. How do these vary over time? _done_
+1. Do packages have URLs for bug reports? _done_
 1. Is there any temporal patterns to when versions are submitted to CRAN?
-1. Have titles & descriptions gotten longer over time?
+1. Have titles & descriptions gotten longer over time? _done_
 1. Do authors use minor versions?
 
 
@@ -149,11 +165,13 @@ Per the R package section in [Hadley's book](https://r-pkgs.org/lifecycle.html#v
 
 This feature could help answer questions about version number progressions.
 
+_Adding 3 columns here..._
+
 ```{r}
 split_versions <- function(dat) {
   stopifnot("version" %in% names(dat))
   
-  dat |>
+  dat %>%
     separate(
       version,
       into =
@@ -165,25 +183,27 @@ split_versions <- function(dat) {
     )
 }
 
-ov_dt <- ov_dt |> split_versions()
-hist_dt <- hist_dt |> split_versions()
-head(hist_dt) |> 
-  reactable(compact = TRUE)
+ov_dt <- ov_dt %>% split_versions()
+hist_dt <- hist_dt %>% split_versions()
+glimpse(ov_dt, 100)
 ```
 
 ## Dependies & Imports {.tabset}
 
 For the last published version of the package, how many dependencies and/and imports does each package have? My hypothesis is that packages in the past relied on lesser dependencies since they were more likely than not written in base R. With the recent explosion of adoption of R, and the adoption of the tidyverse framework, more recent packages would have a larger set of dependencies.
 
+
+_Adding 2 columns here..._
+
 ```{r}
-ov_dt <- ov_dt |> 
+ov_dt <- ov_dt %>% 
   mutate(
     # Dependencies
     num_dep = purrr::map_int(
       .x = depends,
       .f = function(x){
-        x |> 
-          stringr::str_split(",", simplify = TRUE) |> 
+        x %>% 
+          stringr::str_split(",", simplify = TRUE) %>% 
           length()
       }
     ),
@@ -192,8 +212,8 @@ ov_dt <- ov_dt |>
     num_imports = purrr::map_int(
       .x = imports,
       .f = function(x){
-        x |> 
-          stringr::str_split(",", simplify = TRUE) |> 
+        x %>% 
+          stringr::str_split(",", simplify = TRUE) %>% 
           length()
       }
     ),
@@ -206,14 +226,16 @@ glimpse(ov_dt, 100)
 
 How many authors did the latest publish have? Perhaps this could provide some insights into if package authors are collaborating more than they used to. Is the R community working together?
 
+_Adding 1 column here..._
+
 ```{r}
-ov_dt <- ov_dt |> 
+ov_dt <- ov_dt %>% 
   mutate(
     num_authors = purrr::map_int(
       .x = author,
       .f = function(x){
-        x |> 
-          stringr::str_split(",", simplify = TRUE) |> 
+        x %>% 
+          stringr::str_split(",", simplify = TRUE) %>% 
           length()
       }
     )
@@ -225,8 +247,10 @@ glimpse(ov_dt, 100)
 
 Temporal features typically useful for aggregation downstream.
 
+_Adding 6 columns here..._
+
 ```{r}
-hist_dt <- hist_dt |> 
+hist_dt <- hist_dt %>% 
   mutate(
     year = lubridate::year(date),
     month = lubridate::month(date, label = TRUE),
@@ -235,8 +259,8 @@ hist_dt <- hist_dt |>
     yr_mon = sprintf("%d-%s", year, month),
     dt = lubridate::ym(paste0(year, "-", month))
   )
-ov_dt <- ov_dt |> 
-  filter(!is.na(date_published)) |>
+ov_dt <- ov_dt %>% 
+  filter(!is.na(date_published)) %>%
   mutate(
     year = lubridate::year(date_published),
     month = lubridate::month(date_published, label = TRUE),
@@ -252,8 +276,10 @@ glimpse(ov_dt, 100)
 
 How long are the titles and description fields in the latest package submissions? Any interesting trends over time?
 
+_Adding 2 columns here..._
+
 ```{r}
-ov_dt <- ov_dt |>
+ov_dt <- ov_dt %>%
   mutate(
     len_title = purrr::map_int(title, ~ stringr::str_count(.x, "\\w+")),
     len_desc = purrr::map_int(description, ~ stringr::str_count(.x, "\\w+"))
@@ -261,20 +287,22 @@ ov_dt <- ov_dt |>
 glimpse(ov_dt, 100)
 ```
 
-## Package Licenses {.tabset}
+## Licenses {.tabset}
 
-The raw dataset has `r ov_dt |> count(license) |> nrow()` unique levels for the `license` variable. 
+The raw dataset has `r ov_dt %>% count(license) %>% nrow()` unique levels for the `license` variable. 
 
 ```{r}
-ov_dt |> 
-  count(license) |> 
+ov_dt %>% 
+  count(license) %>% 
   reactable(compact = TRUE)
 ```
 
 But many of being quite similar to each other, some binning is in order to extract some patterns. Here, I use the `case_when` to bin together similar licenses. (I'm no expert in these licenses. I'm sure I'm taking some liberties in the grouping here).
 
+_Adding 1 column here..._
+
 ```{r}
-ov_dt <- ov_dt |> 
+ov_dt <- ov_dt %>% 
   mutate(
     license_cleaned = case_when(
       str_detect(license, "^GPL-3") ~ "GPL-3",
@@ -290,7 +318,8 @@ ov_dt <- ov_dt |>
       str_detect(license, "CC0") ~ "CC0",
       license == "GPL" ~ "GPL",
       TRUE ~ "Other"
-      # str_detect(license, "GNU") ~ "GNU", # Left these out after some trials with plots below
+      # Left these out after some trials with plots below:
+      # str_detect(license, "GNU") ~ "GNU", 
       # str_detect(license, "MPL") ~ "MPL",
       # str_detect(license, "Unlimited") ~ "Unlimited",
       # str_detect(license, "^CC") ~ "CC",
@@ -303,8 +332,10 @@ glimpse(ov_dt, 100)
 
 Which domains do package authors typically use? My guess is GitHub rules them all, but is that true? Can we see any rise of other offerings like GitLab or BitBucket?
 
+_Adding 2 columns here..._
+
 ```{r}
-ov_dt <- ov_dt |>
+ov_dt <- ov_dt %>%
   mutate(url_domain = map_chr(url,
                               ~ {
                                 if (is.na(.x))
@@ -339,151 +370,136 @@ Now that I have the data sets prepared and ready, it's time for the fun part - b
 1. Have titles & descriptions gotten longer over time?
 1. Do authors use minor versions?
 
-## Package Dependencies
+## Package Dependencies {.tabset}
 
 _Q: How have the dependencies & imports changed over time?_
 
-Taking the last published year-month combo for the active packages in the repo, I can calculate the median values for dependencies and imports. Medians will be robust against outliers, while also conviniently giving us whole numbers. 
+### Time Series Plots {.tabset}
+
+Here's a time series plot of the number of imports and dependencies since 2008. Since the values are integers, adding some jitter adds some much needed separation in the individual values.
+
+The data supports my hypothesis that more recent packages would have a larger set of dependencies. We're currently at a median of 6 imports. But look at the explosion of package dependencies in the recent past!
+
+Also, what happens mid-2015? There's a clear elbow in the trend right at that time. It doesn't seem organic; did some popular package get released which others used as dependenies? did ÇRAN's measurement system change?
 
 ```{r message=FALSE, warning=FALSE}
-ov_dt |> 
-  select(date_published, dt, num_imports) |> 
-  timetk::pad_by_time(date_published, .pad_value = 0) |> 
-  mutate(dt = lubridate::ym(paste0(lubridate::year(date_published), "-", lubridate::month(date_published)))) |> 
-  group_by(dt) |>
-  mutate(median_imports = median(num_imports)) -> plot_dt
+plot_dotplot_ts <- function(dat,
+                            title,
+                            dday = 90,
+                            pcutoff = 0.95,
+                            size = 1,
+                            alpha = 0.06){
+  
+  stopifnot(all(c("dt", "date_published", "y", "median_y") %in% names(dat)))
+  p95 <- quantile(dat$y, pcutoff)
+  dat %>%
+    ggplot(aes(x = dt)) +
+    geom_jitter(aes(y = y), alpha = alpha, size = size) +
+    geom_smooth(aes(y = median_y), color = "red") +
+    scale_x_date(
+      date_breaks = "1 year",
+      date_labels = "'%y",
+      minor_breaks = NULL,
+      expand = c(NA, 0.2)
+    ) +
+    scale_y_continuous(minor_breaks = NULL, limits = c(NA, p95)) +
+    theme(
+      panel.grid = element_blank(),
+      axis.ticks.x.bottom = element_line(size = 0.8, colour = "gray"),
+      axis.ticks.y.left = element_line(size = 0.8, colour = "gray"),
+      plot.margin = margin(0, 50, 0, 50)
+    ) +
+    labs(title = title,
+         caption = sprintf("Y axis clipped at %0.2f percentile", pcutoff),
+         x = NULL, y = NULL) +
+    coord_cartesian(clip = "off") +
+    annotate(
+      "text",
+      x = max(dat$date_published) + lubridate::ddays(90),
+      y = max(dat$median_y),
+      label = sprintf("Median: %d", max(dat$median_y)),
+      vjust = 0.5,
+      hjust = 0,
+      color = "red"
+    )
+}
 
-plot_dt |> 
-  ggplot(aes(x = dt)) +
-  geom_point(aes(y = num_imports), alpha = 0.01) +
-  geom_smooth(aes(y = median_imports), color = "red") +
-  scale_x_date(date_breaks = "1 year", date_labels = "'%y", minor_breaks = NULL, expand = c(NA, 0.2)) +
-  scale_y_continuous(minor_breaks = NULL) +
-  theme(
-    panel.grid = element_blank(),
-    axis.ticks.x.bottom = element_line(size = 0.5, colour = "gray"),
-    axis.ticks.y.left = element_line(size = 0.5, colour = "gray"),
-    plot.margin = margin(0,50,0,50)
-  ) +
-  labs(
-    title = "How have `imports` changed over time?",
-    x = NULL, y = NULL
-  ) +
-  coord_cartesian(clip = "off") +
-  annotate(
-    "text",
-    x = max(plot_dt$date_published)+lubridate::ddays(90),
-    y = max(plot_dt$median_imports),
-    label = sprintf("Median: %d", max(plot_dt$median_imports)),
-    vjust = 1,
-    hjust = 0,
-    color = "red"
+ov_dt %>% 
+  select(date_published, dt, y = num_imports) %>% 
+  timetk::pad_by_time(date_published, .pad_value = 0) %>% 
+  mutate(dt = lubridate::ym(paste0(lubridate::year(date_published), "-", lubridate::month(date_published)))) %>% 
+  group_by(dt) %>%
+  mutate(median_y = median(y)) %>%
+  plot_dotplot_ts(
+    title = "How have package `imports` changed over time?",
+    dday = 90
   )
 ```
 
+```{r message=FALSE, warning=FALSE}
+ov_dt %>% 
+  select(date_published, dt, y = num_dep) %>% 
+  timetk::pad_by_time(date_published, .pad_value = 0) %>% 
+  mutate(dt = lubridate::ym(paste0(lubridate::year(date_published), "-", lubridate::month(date_published)))) %>% 
+  group_by(dt) %>%
+  mutate(median_y = median(y))%>%
+  plot_dotplot_ts(
+    title = "How have package `dependencies` changed over time?",
+    dday = 90
+  )
+```
 
-```{r fig.height=5, fig.width=5}
-deps <- ov_dt |> 
-  select(year, len_desc, len_title) |> 
-  arrange(-year) |> 
-  filter(!is.na(year), year > 2008) |> 
+### Ridge Plots {.tabset}
+
+Another interesting way to look at the same data is by ridge plots using [`{ggridges}`](https://wilkelab.org/ggridges/). It's easy to see the large spread of descriptions and how it's been increasing over time.
+
+```{r fig.height=7, fig.width=9, message=FALSE, warning=FALSE}
+deps <- ov_dt %>%
+  select(year,
+         `Description Length` = len_desc,
+         `Title Length` = len_title) %>%
+  arrange(-year) %>%
+  filter(!is.na(year), year > 2008) %>%
   mutate(year = factor(year, levels = seq(2008, 2022)))
-deps |>
-  pivot_longer(-year) |> 
+deps %>%
+  pivot_longer(-year) %>%
   ggplot(aes(y = year, x = value, fill = name)) +
   stat_density_ridges(
     bandwidth = 4,
-    jittered_points = F,
-    position = position_points_jitter(height = 0),
-                      point_shape = "|",
-                      point_size = 2,
-                      size = 0.25,
-                      scale = .95,
-                      quantile_lines = TRUE, 
-                      quantiles = 2,
-                      alpha = 0.7, 
-                      rel_min_height = 0.01) +
-  scale_x_continuous(limits = c(0,200), expand = c(0,0)) +
+    scale = .95,
+    quantile_lines = TRUE,
+    quantiles = 2,
+    alpha = 0.7,
+    rel_min_height = 0.01
+  ) +
+  scale_x_continuous(limits = c(0, 200), expand = c(0, 0)) +
   coord_cartesian(clip = "off") +
-  theme_ridges(center = TRUE)
+  theme_ridges(center = TRUE) +
+  theme(legend.position = "top",
+        legend.title = element_blank()) +
+  labs(
+    title = "Distribution of Description & Title Lengths since 2010",
+    x = NULL,
+    y = NULL
+  )
 ```
 
--   Have titles & descriptions gotten longer over time?
+## Licenses {.tabset}
 
-```{r}
-ov_dt |> 
-    group_by(dt) |> 
-    summarise_at(vars(len_title, len_desc), list(median = median, sd = sd), na.rm = TRUE) |> 
-  ggplot(aes(x= dt)) +
-    geom_jitter(aes(y = len_title_median, color = "len_title_median"), alpha = 0.2) +
-  geom_smooth(aes(y = len_title_median, color = "len_title_median"), span = 0.3, se = FALSE) +
-  geom_jitter(aes(y = len_desc_median, color = "len_desc_median"), alpha = 0.2) +
-  geom_smooth(aes(y = len_desc_median, color = "len_desc_median"), span = 0.3, se = FALSE)
-  # theme_light()
-```
+_Q: What license is most used? Has there been a change over time?_
 
-```{r}
-ov_dt |> 
-  filter(year %in% c(2022, 2020, 2018)) |> 
-  ggplot() +
-  geom_density(aes(x = len_desc, 
-                   fill = as.factor(year), 
-                   color = as.factor(year)
-                   ),
-               alpha = 0.3
-               )
-ov_dt |> 
-  filter(year %in% c(2022, 2020, 2018)) |> 
-  ggplot() +
-  geom_histogram(aes(x = len_desc, 
-                   fill = as.factor(year), 
-                   color = as.factor(year)
-                   ),
-               alpha = 0.3
-               ) +
-  facet_wrap(~year)
-```
+### Bubble Chart {.tabset}
 
-```{r}
-ov_dt |> 
-  ggplot(aes(x= date_published, y = len_title)) +
-  geom_jitter(alpha = 0.05) +
-  geom_smooth(span = 0.1, se = FALSE) +
-  theme_light() +
-  scale_y_log10()
-
-ov_dt |> 
-  ggplot(aes(x= date_published, y = len_desc)) +
-  geom_jitter(alpha = 0.05) +
-  geom_smooth(span = 0.2, se = FALSE) +
-  theme_light() +
-  scale_y_log10()
-```
-
-```{r}
-
-```
-
--   What license is most used? Has there been a change over time?
-
-```{r}
-ov_dt |> 
-  group_by(license_cleaned) |> 
-  count() |> 
-  ggplot(aes(x = forcats::fct_reorder(license_cleaned, n), y = n, fill = license_cleaned)) +
-  geom_col() +
-  coord_flip() +
-  theme_minimal() +
-  guides(fill = FALSE) +
-  labs(x = "", y = "")
-```
+While barcharts are certainly the go-to to compare frequencies across categories, bubble charts are a fun way to visualize categories. [GPL licenses](https://www.gnu.org/licenses/licenses.en.html) are certainly the most popular license category being used today.
 
 ```{r}
 plot_bubbles <- function(dat,
                          .scale,
                          plot_radius,
                          bubble_radius,
+                         textsize,
                          alpha,
+                         color,
                          maxiter) {
   .qty <- nrow(dat)
   
@@ -505,7 +521,7 @@ plot_bubbles <- function(dat,
   packed_coords <-
     circleRepelLayout(coords, sizetype = "r", maxiter = maxiter)
   
-  packed_coords$layout |>
+  packed_coords$layout %>%
     ggplot(aes(x, y)) +
     geom_point(aes(size = radius), alpha = alpha) +
     coord_equal() +
@@ -522,143 +538,180 @@ plot_bubbles <- function(dat,
         y = y,
         label = label
       ),
+      color = color,
+      size = textsize,
+      fontface = "bold",
       data = dat,
       hjust = "center",
       vjust = "center"
     )
 }
 
-ov_dt |> 
-    count(license_cleaned) |> 
-    top_n(6, n) |> 
-  mutate(label = sprintf("%s\n%d Pkgs", license_cleaned, n)) |> 
-    arrange(runif(1:n())) |> 
+set.seed(31415)
+ov_dt %>%
+  count(license_cleaned) %>%
+  top_n(8, n) %>%
+  mutate(label = sprintf(
+    "%s\n%s",
+    license_cleaned,
+    scales::label_comma(suffix = " Pkgs")(n)
+  )) %>%
+  arrange(runif(1:n())) %>%
   plot_bubbles(
-    .scale = 100,
-    plot_radius = 10,
-    bubble_radius = 0.56,
+    .scale = 50,
+    plot_radius = 8,
+    bubble_radius = .32,
+    textsize = 8,
     alpha = 0.2,
+    color = "gray30",
     maxiter = 1000
   )
-
-
-# .scale <- 100
-# .qty <- 6
-# lic <- ov_dt |> 
-#   group_by(license_cleaned) |> 
-#   count() |> 
-#   arrange(-n) |> 
-#   head(.qty) |>
-#   mutate(n_scaled = round(n / .scale)) |> 
-#   arrange(runif(1:n()))
-#   
-# r <- 10
-# theta <- seq(0, 360, length.out = .qty+1)
-# lic$x <- r * cos(theta * pi / 180)[-1]
-# lic$y <- r * sin(theta * pi / 180)[-1]
-# xpack <- rep(lic$x, times=lic$n_scaled)
-# ypack <- rep(lic$y, times=lic$n_scaled)
-# 
-# coords <- tibble(x=xpack+runif(length(xpack)),
-#                      y=ypack+runif(length(ypack)),
-#                      r=.56)
-# packed_coords <- circleRepelLayout(coords, sizetype="r", maxiter=1000)
-# packed_coords$layout |> 
-#   ggplot(aes(x, y)) +
-#   geom_point(aes(size = radius), alpha = 0.2) +
-#   coord_equal() +
-#   theme_minimal() +
-#   theme(legend.position = "none",
-#         panel.grid = element_blank(),
-#         axis.title = element_blank(),
-#         axis.text = element_blank()) +
-#   geom_text(aes(x = x, 
-#                 y = y, 
-#                 label = sprintf("%s\n%d Pkgs", license_cleaned, n)),
-#             data = lic,
-#             hjust = "center", 
-#             vjust = "center") 
-
 ```
 
+### Barchart {.tabset}
+
+While those bubble charts are nice to look at, a standard issue bar chart is the clear winner to visualize the relative distributions of the categories, especially the cliff event after the top 3 license types.
+
 ```{r}
-ov_dt |> 
-  group_by(dt) |> 
-  count(license_cleaned) |> 
-  mutate(license_cleaned = forcats::fct_reorder(license_cleaned, n)) |> 
+ov_dt %>% 
+  count(license_cleaned) %>% 
+  ggplot(aes(x = forcats::fct_reorder(license_cleaned, n), y = n, fill = license_cleaned)) +
+  geom_col() +
+  coord_flip() +
+  theme_minimal() +
+  guides(fill = "none") +
+  labs(x = NULL, y = NULL, title = "Which license is the most popular?")
+```
+
+### TS Plot {.tabset}
+
+GPL-2, GPL-3 and MIT licenses seem to have the same adoption rate over time. Again, we see the sudden shifts in datapoints available after mid-2015.
+
+```{r message=FALSE, warning=FALSE}
+ov_dt %>% count(license_cleaned) %>% arrange(-n) -> lic_n
+ov_dt %>% 
+  group_by(dt) %>% 
+  count(license_cleaned) %>% 
+  mutate(license_cleaned = factor(license_cleaned, levels = lic_n$license_cleaned)) %>% 
   ggplot(aes(x= dt, y = n, color = license_cleaned)) +
-  # geom_line( alpha = 0.3) +
+  geom_smooth(span = 0.4, se = FALSE, show.legend = FALSE, size = .3) +
+  geom_jitter(alpha = 0.8) +
+  theme_light() +
+  theme(
+    legend.title = element_blank()
+  ) +
+  labs(
+    x = NULL,
+    y = "Count",
+    title = "Adoption of Licenses"
+  )
+```
+
+### Stream Graph {.tabset}
+
+A striking way to visualize time-series data is using streamgraphs. The [`{streamgraph}`](http://hrbrmstr.github.io/streamgraph/) package is an R API to access the D3 library to make these beautiful plots. While the previous time-series plot is miminal & most definitely allows a user to quickly extract a change in trend and comparison between the groups, this streamgraph is just a joy to look at.
+
+Here, I'm plotting the series from 2015 to Jun-2022.
+
+```{r message=FALSE, warning=FALSE}
+ov_dt %>% 
+  group_by(dt) %>% 
+  count(license_cleaned) %>%
+  ungroup() %>%
+  timetk::pad_by_time(.date_var = dt, .by = "month", .pad_value = 0) %>%
+  group_by(dt) %>%
+  mutate(license_cleaned = factor(license_cleaned, levels = lic_n$license_cleaned),
+         val = sum(n),
+         pc = n / val) -> pdat
+
+pdat |> 
+  filter(dt > "2015-01-01", dt < "2022-06-30") |> 
+  streamgraph(license_cleaned, n, dt)  %>%
+  sg_axis_x(1, "year", "%Y") %>%
+  sg_legend(show=TRUE, label="License: ") %>%
+  sg_fill_brewer("Spectral") %>%
+  sg_title("License Adoption since 2015")
+```
+
+## Bug Report URLs {.tabset}
+
+_Q: Do packages have URLs for bug reports?_
+
+```{r message=FALSE, warning=FALSE}
+ov_dt %>%
+  group_by(dt) %>% 
+  count(url_exist = is.na(url_domain)) %>%  
+  ggplot(aes(x= dt, y = n, color = url_exist)) +
+  geom_jitter(alpha = 0.3) +
+  geom_smooth(span = 0.3, se = FALSE) +
+  theme_light()
+ov_dt %>% 
+  group_by(dt) %>% 
+  count(url_exist = is.na(bug_domain)) %>%  
+  ggplot(aes(x= dt, y = n, color = url_exist)) +
   geom_jitter(alpha = 0.3) +
   geom_smooth(span = 0.3, se = FALSE) +
   theme_light()
 ```
 
--   Do packages have URLs for bug reports?
+## Domains {.tabset}
 
-```{r}
-ov_dt |> 
-  group_by(dt) |> 
-  count(url_exist = is.na(url)) |>  
-  ggplot(aes(x= dt, y = n, color = url_exist)) +
-  geom_jitter(alpha = 0.3) +
-  geom_smooth(span = 0.3, se = FALSE) +
-  theme_light()
-ov_dt |> 
-  group_by(dt) |> 
-  count(url_exist = is.na(bug_reports)) |>  
-  ggplot(aes(x= dt, y = n, color = url_exist)) +
-  geom_jitter(alpha = 0.3) +
-  geom_smooth(span = 0.3, se = FALSE) +
-  theme_light()
-```
+_Q: Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?_
 
--   Which repositories do packages use? Github/Bitbucket etc. How do these vary over time?
-
-```{r}
-ov_dt |> 
-  filter(domain != "") |> 
-  mutate(domain = forcats::fct_lump_min(domain, 20)) |> 
-  group_by(dt) |> 
-  count(domain) |>  
-  ggplot(aes(x= dt, y = n, color = domain)) +
+```{r message=FALSE, warning=FALSE}
+ov_dt %>% 
+  filter(bug_domain != "") %>% 
+  mutate(bug_domain = forcats::fct_lump_min(bug_domain, 20)) %>% 
+  group_by(dt) %>% 
+  count(bug_domain) %>%  
+  ggplot(aes(x= dt, y = n, color = bug_domain)) +
   geom_jitter(alpha = 0.3) +
   geom_smooth(span = 0.5, se = FALSE) +
   theme_light()
 ```
 
 ```{r}
-ov_dt |> 
-   filter(domain != "") |> 
-  mutate(domain = forcats::fct_lump_min(domain, 20)) |> 
-    count(domain) |> 
-  mutate(label = sprintf("%s\n%d", domain, n)) |> 
-    arrange(runif(1:n())) |> 
+ov_dt %>% 
+  filter(bug_domain != "") %>% 
+  mutate(bug_domain = forcats::fct_lump_min(bug_domain, 20)) %>% 
+  count(bug_domain) %>% 
+  mutate(label = sprintf("%s\n%s", bug_domain, scales::label_comma()(n))) %>% 
+  arrange(runif(1:n())) %>% 
   plot_bubbles(
-    .scale =50,
-    plot_radius = 6,
-    bubble_radius = 0.4,
+     .scale = 30,
+    plot_radius = 5,
+    bubble_radius = .3,
+    textsize = 8,
     alpha = 0.2,
-    maxiter = 1000
+    color = "gray30",
+    maxiter = 1300
   )
 ```
 
--   Is there any temporal patterns to when versions are submitted to CRAN?
+## Temporal Patterns {.tabset}
+
+_Q: Is there any temporal patterns to when versions are submitted to CRAN?_
 
 ```{r}
-ov_dt |> 
-  filter(!is.na(dt), dt < "2022-07-01") |> 
-  count(dt) |> 
-  arrange(dt) |> 
-  timetk::pad_by_time(dt, .by = "month", .pad_value = 0) |> 
+ov_dt %>% 
+  filter(!is.na(dt), dt < "2022-07-01") %>% 
+  count(dt) %>% 
+  arrange(dt) %>% 
+  timetk::pad_by_time(dt, .by = "month", .pad_value = 0) %>% 
   ggplot(aes(dt, n)) +
   geom_line()
 
-ov_dt |> 
-  filter(!is.na(dt), dt < "2022-07-01") |> 
-  count(dt) |> 
-  arrange(dt) |> 
+ov_dt %>% 
+  filter(!is.na(dt), dt < "2022-07-01") %>% 
+  count(dt) %>% 
+  arrange(dt) %>% 
   timetk::pad_by_time(dt, .by = "month", .pad_value = 0) -> xdat
 timetk::plot_seasonal_diagnostics(xdat, dt, log(n), .interactive = FALSE)
 
-timetk::plot_stl_diagnostics(xdat |> filter(dt > "2018-01-01", dt < "2022-07-01"), dt, n, .interactive = FALSE, .feature_set = c("observed", "season", "trend", "remainder"))
+timetk::plot_stl_diagnostics(xdat %>% filter(dt > "2018-01-01", dt < "2022-07-01"), dt, n, .interactive = FALSE, .feature_set = c("observed", "season", "trend", "remainder"))
 ```
+
+
+---
+
+Thanks for reading the EDA, lots more to explore in this dataset!
